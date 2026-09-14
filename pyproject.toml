@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kg-noise-lite"
+version = "0.1.0"
+description = "Does a BERT classifier detect entity- vs relation-level label noise in KG-to-text data equally well?"
+requires-python = ">=3.12"
+dependencies = [
+    "transformers",
+    "datasets",
+    "scikit-learn",
+    "numpy",
+    "accelerate",
+]
+# torch is intentionally NOT listed here: it needs a CUDA build matched to
+# the local driver (see README "Setup") - a plain `pip install -e .` would
+# otherwise pull the latest CUDA wheel and silently break
+# torch.cuda.is_available() on an older driver.
+
+[tool.setuptools.packages.find]
+where = ["src"]

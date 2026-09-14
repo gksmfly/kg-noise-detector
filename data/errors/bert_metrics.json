@@ -1,0 +1,31 @@
+{
+  "val": {
+    "eval_loss": 0.07680518925189972,
+    "eval_accuracy": 0.9848484848484849,
+    "eval_precision_macro": 0.9825509375934389,
+    "eval_recall_macro": 0.9833916083916084,
+    "eval_f1": 0.9829694063111221,
+    "eval_recall_noisy": 0.9877622377622378,
+    "eval_precision_noisy": 0.989492119089317,
+    "eval_f1_noisy": 0.9886264216972879,
+    "eval_runtime": 1.7461,
+    "eval_samples_per_second": 1965.506,
+    "eval_steps_per_second": 61.852,
+    "epoch": 4.0
+  },
+  "test": {
+    "test_loss": 0.05944698676466942,
+    "test_accuracy": 0.9874818049490539,
+    "test_precision_macro": 0.9850083995815024,
+    "test_recall_macro": 0.9868995633187774,
+    "test_f1": 0.9859445419136795,
+    "test_recall_noisy": 0.988646288209607,
+    "test_precision_noisy": 0.9925471284524331,
+    "test_f1_noisy": 0.9905928680813826,
+    "test_runtime": 1.7538,
+    "test_samples_per_second": 1958.557,
+    "test_steps_per_second": 61.579,
+    "epoch": 4.0
+  },
+  "max_length": 48
+}

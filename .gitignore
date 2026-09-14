@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+
+# fine-tuned model checkpoints (large, regenerable via scripts/05_train_bert.py)
+models/
+
+# noisy run log
+data/errors/train_bert.log
