@@ -49,6 +49,58 @@ Distant-supervision 방식의 KG-to-text 데이터셋에는 흔히 두 종류의
 | 7 | [`scripts/07_evaluate_compare.py`](scripts/07_evaluate_compare.py) | 두 모델의 test 지표를 표 하나로 합친다. |
 | 8 | [`scripts/08_error_analysis.py`](scripts/08_error_analysis.py) | **핵심 결과:** 두 모델 모두 `entity_corruption` vs `relation_corruption`별 recall 분해 + 정성적 오류 사례. |
 
+## 실험 설계 원칙
+
+각 스크립트의 docstring에 흩어져 있는 "왜 이렇게 했는가"를 한곳에 모았다.
+새 알고리즘을 만든 프로젝트는 아니지만, 비교가 공정하려면 아래 선택들이
+전부 의도적으로 필요했다.
+
+- **Corruption은 슬롯 하나만, 나머지는 전부 고정.** `entity_corruption`과
+  `relation_corruption` 모두 트리플 문자열 안 슬롯 하나만 바꾸고 문장 전체와
+  트리플의 나머지 두 슬롯은 그대로 둔다([`scripts/02`](scripts/02_generate_negatives.py)).
+  entity corruption이 문장까지 같이 바꾼다든가 하면, "어느 쪽이 더
+  탐지하기 어려운가"라는 비교 자체가 애초에 불공정해진다.
+- **치환값은 코퍼스 자체 풀에서만 뽑는다.** 아무 값이나 무작위로 넣지 않고,
+  같은 코퍼스에 실제로 등장하는 subject/object/relation 풀에서만 치환값을
+  고른다([`scripts/02`](scripts/02_generate_negatives.py)의 `other()`). 너무
+  뻔하게 이상한 negative(예: 공항 이름 자리에 색깔 이름)를 만들면 탐지가
+  쉬워져서 비교가 무의미해진다.
+- **대응이 모호한 샘플은 애초에 제외.** 문장 하나가 트리플 여러 개를
+  서술하면 "어느 트리플에 대응하는가"가 불명확해지므로, 단일 트리플
+  샘플만 쓴다([`scripts/01`](scripts/01_load_webnlg.py),
+  [`scripts/11`](scripts/11_load_dart_wikitable.py)).
+- **분할은 pair_id 단위로, leakage를 검증까지 한다.** 같은 원본에서 나온
+  positive/entity_corruption/relation_corruption 3행이 train과 test에
+  흩어지면 모델이 답을 외워서 맞힐 수 있다. `pair_id` 단위로 먼저 나누고,
+  split 간 `pair_id` 중복이 0건인지 매번 자동으로
+  확인한다([`kg_noise/splitting.py`](src/kg_noise/splitting.py)).
+- **성격이 다른 두 모델을 나란히 둔다.** BERT(문맥 이해 가능)와
+  TF-IDF(표면 어휘만 봄)를 같이 비교해야, 격차가 "정말 어려운 문제"인지
+  "표면 신호가 아예 없어서"인지 구분할 수 있다
+  ([`scripts/05`](scripts/05_train_bert.py),
+  [`scripts/06`](scripts/06_tfidf_baseline.py)).
+- **평가를 corruption 유형별로 쪼갠다.** 전체 accuracy 하나로 뭉뚱그리면
+  entity/relation 격차 자체가 안 보인다. recall을 유형별로 분리 계산하는
+  게 핵심 연구 질문에 답하는 유일한 방법이다([`scripts/08`](scripts/08_error_analysis.py)).
+- **도메인 선택도 변수 하나를 조작하는 실험이다.** DART WikiSQL/
+  WikiTableText는 우연히 고른 게 아니라 "relation 이름이 자연어에 가까운
+  도메인"이라는 조건에서 역산해서 골랐다 — 나머지 방법론(corruption 규칙,
+  모델, 평가 방식)은 전부 고정한 채 이 변수 하나만
+  바꿨다([`scripts/11`](scripts/11_load_dart_wikitable.py)).
+- **Zero-shot과 재학습을 목적에 맞게 구분해서 쓴다.** NYT-FB(부록)는
+  "WebNLG로만 학습된 모델이 실제 노이즈 데이터에서 어떻게 행동하는가"를
+  보려는 것이라 zero-shot이 맞다. 반면 DART는 "같은 학습 절차, 다른
+  도메인"이라는 통제된 비교가 목적이라 반드시 재학습해야 한다 — zero-shot을
+  쓰면 도메인 전이 실패라는 다른 요인이 섞여 들어간다
+  ([`scripts/09`](scripts/09_nyt_case_study.py),
+  [`scripts/15`](scripts/15_train_bert_dart.py)).
+- **예상과 다르게 나온 결과의 교란 요인을 숨기지 않는다.** DART 실험은
+  relation 자연어성만 바꾼 게 아니라 표본 크기와 relation당 예시 수도
+  같이 줄었다. 이 사실을 결과와 함께 명시하고, 두 요인을 가를 다음
+  실험(WebNLG 서브샘플링 ablation)을 구체적으로
+  제안한다([`scripts/19`](scripts/19_compare_domains.py), 아래 "도메인
+  일반화 검증" 참고).
+
 ## 환경 설정
 
 이 프로젝트는 이 기기의 다른 프로젝트와 분리된 자체 venv를 쓴다. 로컬
@@ -85,20 +137,31 @@ editable 모드로 설치한다(런타임 의존성은 바로 위에서 이미 �
 │       ├── io_utils.py       # JSONL 읽기/쓰기 (load_jsonl, save_jsonl)
 │       ├── constants.py      # 라벨 인코딩(LABEL_NOISY/LABEL_GROUNDED), 베이스 모델명
 │       ├── metrics.py        # BERT·TF-IDF가 공통으로 쓰는 분류 지표
-│       └── inference.py      # 파인튜닝된 분류기 로딩 + 추론 (스크립트 9, 10용)
-├── scripts/                 # 번호가 매겨진 파이프라인 진입점 (01~10, 순서대로 실행)
-│   ├── 01_load_webnlg.py
-│   ├── 02_generate_negatives.py
-│   ├── 03_split_dataset.py
-│   ├── 04_analyze_lengths.py
-│   ├── 05_train_bert.py
-│   ├── 06_tfidf_baseline.py
-│   ├── 07_evaluate_compare.py
-│   ├── 08_error_analysis.py
-│   ├── 09_nyt_case_study.py          # 부록 (아래 참고)
-│   └── 10_nyt_notrunc_comparison.py  # 부록 (아래 참고)
+│       ├── inference.py      # 파인튜닝된 분류기 로딩 + 추론 (스크립트 9, 10용)
+│       ├── negatives.py      # entity/relation corruption 생성 (스크립트 2, 12용)
+│       └── splitting.py      # pair_id 단위 stratified split (스크립트 3, 13용)
+├── scripts/                 # 번호가 매겨진 파이프라인 진입점, 순서대로 실행
+│   ├── 01_load_webnlg.py             ┐
+│   ├── 02_generate_negatives.py      │ 본실험 (WebNLG)
+│   ├── 03_split_dataset.py           │
+│   ├── 04_analyze_lengths.py         │
+│   ├── 05_train_bert.py              │
+│   ├── 06_tfidf_baseline.py          │
+│   ├── 07_evaluate_compare.py        │
+│   ├── 08_error_analysis.py          ┘
+│   ├── 09_nyt_case_study.py          ┐ 부록: NYT-FB 정성적 탐침
+│   ├── 10_nyt_notrunc_comparison.py  ┘ (아래 참고)
+│   ├── 11_load_dart_wikitable.py     ┐
+│   ├── 12_generate_negatives_dart.py │
+│   ├── 13_split_dataset_dart.py      │
+│   ├── 14_analyze_lengths_dart.py    │ 도메인 일반화 검증: DART
+│   ├── 15_train_bert_dart.py         │ (아래 참고)
+│   ├── 16_tfidf_baseline_dart.py     │
+│   ├── 17_evaluate_compare_dart.py   │
+│   ├── 18_error_analysis_dart.py     │
+│   └── 19_compare_domains.py         ┘
 ├── data/                     # 파이프라인 입출력 (raw/processed/splits/errors)
-└── models/                   # 파인튜닝 체크포인트 (.gitignore로 추적 제외, scripts/05로 재생성 가능)
+└── models/                   # 파인튜닝 체크포인트 (.gitignore로 추적 제외, scripts/05·15로 재생성 가능)
 ```
 
 각 `scripts/NN_*.py` 파일은 재사용 로직을 담는 곳이 아니라 `src/kg_noise/`를
@@ -156,6 +219,54 @@ corruption이 명명된 entity corruption보다 어렵다는 점)에 대한 설�
 [`data/errors/error_analysis_report.md`](data/errors/error_analysis_report.md)에
 있다.
 
+## 도메인 일반화 검증 — DART(WikiSQL/WikiTableText)
+
+**질문:** WebNLG의 relation은 DBpedia/Freebase 스타일 카멜케이스 식별자다
+(`cityServed`, `foundedBy`) — 위 핵심 결과(Step 8)는 이런 식별자가 문장
+표면에 거의 등장하지 않아서 relation corruption이 entity corruption보다
+탐지하기 어렵다는 것이었다. 그렇다면 relation 이름이 애초에 자연어에 가까운
+도메인에서는 이 격차가 좁혀질까?
+
+[`scripts/11_load_dart_wikitable.py`](scripts/11_load_dart_wikitable.py)는
+[DART](https://huggingface.co/datasets/GEM/dart)(WikiSQL, WikiTableText,
+WebNLG, E2E를 합친 오픈도메인 record-to-text 데이터셋)에서 WikiSQL/
+WikiTableText 계열만 추출한다. 이 서브셋의 relation은 위키피디아 표의
+컬럼 헤더(`COLLEGE`, `CITY`, `FEET`)라 WebNLG보다 훨씬 자연어에 가깝다.
+단일 트리플 샘플 2,366건을 얻어(WebNLG 방법론과 동일하게 `category` 대신
+소스 이름으로 stratify), Step 1~8과 정확히 같은 절차(`scripts/12`~`18`)로
+entity/relation corruption을 만들고 BERT를 새로 파인튜닝해 재현했다 — 기존
+WebNLG 모델을 재사용(zero-shot)하지 않고 이 도메인 전용으로 다시 학습해야
+"같은 학습 절차, 다른 도메인"이라는 통제된 비교가 된다.
+
+**결과는 예상과 정반대였다.** relation 이름이 자연어에 가까워지면 격차가
+좁혀질 거라 예상했지만, 실제로는 두 모델 모두 격차가 훨씬 크게 벌어졌다.
+
+| 도메인 | 모델 | Entity corruption recall | Relation corruption recall | 격차 |
+|---|---|---|---|---|
+| WebNLG | BERT (fine-tuned) | 0.9965 | 0.9808 | +0.0157 |
+| WebNLG | TF-IDF baseline | 0.7694 | 0.5817 | +0.1878 |
+| DART | BERT (fine-tuned) | 0.9803 | 0.6930 | **+0.2873** |
+| DART | TF-IDF baseline | 0.8338 | 0.5239 | +0.3099 |
+
+BERT 기준 격차가 1.6%p에서 28.7%p로 거의 18배 벌어졌다.
+
+**교란 요인:** DART로 도메인만 바꾼 게 아니라 표본 크기도 함께 크게
+줄었다(train 16,023행 → 4,968행, 31%) — 게다가 relation 어휘는 오히려 더
+길게 꼬리를 문다(고유 relation 346개 → 1,066개). 그 결과 relation당 평균
+예시 수가 22.1개에서 2.2개로 10분의 1이 됐다. 그래서 이 결과만으로는
+"relation 이름의 자연어성은 격차와 무관하다"와 "relation 판정은 entity
+판정보다 학습 데이터가 훨씬 더 많이 필요해서, 데이터가 줄면 relation
+recall이 불균형하게 더 떨어진다"는 두 가설을 가를 수 없다. 이 둘을
+분리하려면 WebNLG train을 DART와 같은 크기(4,968행)로 서브샘플링해서
+같은 실험을 반복하는 ablation이 필요하다(relation 자연어성은 WebNLG
+그대로 유지한 채 표본 크기만 맞추는 대조군). 아직 실행하지 않았다 — 아래
+향후 과제 참고.
+
+전체 수치와 corruption_type별 오분류 사례는
+[`data/errors/domain_comparison_report.md`](data/errors/domain_comparison_report.md)(요약)와
+[`data/errors/dart_error_analysis_report.md`](data/errors/dart_error_analysis_report.md)(상세)에
+있다.
+
 ## 스코프
 
 의도적으로 제외했고, 향후 과제로 남겨둔 것들:
@@ -208,6 +319,11 @@ relation 경로(`/people/person/nationality`)와 단순 자연어 변환(경로 
 - corruption 유형을 확장해서(순서 오류, 다중 트리플 혼합, 암묵적 relation
   노이즈) 난이도 스펙트럼을 구축한다.
 - 제대로 통제된 distant-supervision 일반화 검증에는 사람이 라벨링한
-  소규모 테스트셋(NYT-FB 100~200건 수작업 주석)이 필요하다 — 위의 정성적
-  탐침은 그것을 대신하는 게 아니라 임시 대체물이다.
+  소규모 테스트셋(NYT-FB 100~200건 수작업 주석)이 필요하다 — 위 부록의
+  정성적 탐침은 그것을 대신하는 게 아니라 임시 대체물이다.
+- **WebNLG train 서브샘플링 ablation**(위 "도메인 일반화 검증" 참고) — WebNLG train을 DART와
+  같은 크기(4,968행)로 무작위 서브샘플링해 재학습하면, DART에서 본
+  entity/relation 격차 확대가 "relation 이름의 자연어성" 때문인지
+  "데이터 희소성" 때문인지 가를 수 있다. 지금 파이프라인 구조로 바로
+  실행 가능한, 아직 안 돌린 실험이다.
 - 검증된 탐지기를 KG 구축 파이프라인의 1차 노이즈 필터로 통합한다.
