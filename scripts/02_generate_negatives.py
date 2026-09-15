@@ -17,9 +17,10 @@ Step 2: Negative(노이즈) 데이터 생성.
 대칭적으로 설계되어 있다 — 이래야 "어느 쪽이 더 탐지하기 어려운가"라는 연구
 질문이 공정한 비교가 된다.
 """
-import random
+from collections import Counter
 
 from kg_noise.io_utils import load_jsonl, save_jsonl
+from kg_noise.negatives import generate_negatives
 from kg_noise.paths import PROCESSED_DIR, RAW_DIR
 
 SRC = RAW_DIR / "webnlg_pairs.jsonl"
@@ -28,8 +29,6 @@ SEED = 42
 
 
 def main():
-    rng = random.Random(SEED)
-
     rows = load_jsonl(SRC)
     print(f"[2] 원본 positive: {len(rows)}건")
 
@@ -39,70 +38,11 @@ def main():
     print(f"[2] 치환 풀: subject {len(subject_pool)} / object {len(object_pool)} / "
           f"relation {len(relation_pool)}")
 
-    def other(pool: list[str], current: str) -> str:
-        choice = current
-        # 아주 드물게 같은 값이 뽑히는 경우를 대비한 재시도 (풀이 1개뿐인 극단적 경우 방지)
-        for _ in range(10):
-            choice = rng.choice(pool)
-            if choice != current:
-                break
-        return choice
+    full = generate_negatives(rows, SEED)
+    n_by_type = Counter(r["corruption_type"] for r in full)
+    print(f"[2] 생성: positive {n_by_type['none']}건 + entity_corruption {n_by_type['entity']}건 + "
+          f"relation_corruption {n_by_type['relation']}건 = {len(full)}건")
 
-    full = []
-    n_entity, n_relation = 0, 0
-    for r in rows:
-        base = {"pair_id": r["pair_id"], "category": r["category"]}
-
-        # positive
-        full.append({
-            **base,
-            "triple_text": r["triple_text"],
-            "sentence": r["sentence"],
-            "subject": r["subject"], "relation": r["relation"], "object": r["object"],
-            "corruption_type": "none",
-            "label": 1,
-        })
-
-        # entity_corruption: subject 또는 object 중 하나를 50/50으로 골라 치환
-        if rng.random() < 0.5:
-            new_subject = other(subject_pool, r["subject"])
-            new_object = r["object"]
-            corrupted_slot = "subject"
-        else:
-            new_subject = r["subject"]
-            new_object = other(object_pool, r["object"])
-            corrupted_slot = "object"
-        entity_triple = f"{new_subject} | {r['relation']} | {new_object}"
-        full.append({
-            **base,
-            "triple_text": entity_triple,
-            "sentence": r["sentence"],
-            "subject": new_subject, "relation": r["relation"], "object": new_object,
-            "corruption_type": "entity",
-            "corrupted_slot": corrupted_slot,
-            "original_subject": r["subject"], "original_object": r["object"],
-            "label": 0,
-        })
-        n_entity += 1
-
-        # relation_corruption: relation을 치환
-        new_relation = other(relation_pool, r["relation"])
-        relation_triple = f"{r['subject']} | {new_relation} | {r['object']}"
-        full.append({
-            **base,
-            "triple_text": relation_triple,
-            "sentence": r["sentence"],
-            "subject": r["subject"], "relation": new_relation, "object": r["object"],
-            "corruption_type": "relation",
-            "original_relation": r["relation"],
-            "label": 0,
-        })
-        n_relation += 1
-
-    print(f"[2] 생성: positive {len(rows)}건 + entity_corruption {n_entity}건 + "
-          f"relation_corruption {n_relation}건 = {len(full)}건")
-
-    rng.shuffle(full)
     save_jsonl(OUT, full)
     print(f"[2] 저장 -> {OUT}")
 
